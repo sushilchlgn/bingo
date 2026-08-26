@@ -1,69 +1,121 @@
 package main
 
-import (
-	"math/rand"
-)
+import "math/rand"
 
-// Card is a 5x5 grid of numbers. Column ranges follow classic BINGO rules:
-// B: 1-15, I: 16-30, N: 31-45 (center is free), G: 46-60, O: 61-75.
+// Card is a 5x5 Bingo card.
+//
+// Every card contains every number from 1 to 25 exactly once.
+// The arrangement is randomized for each player.
+//
+// There is NO free space.
 type Card [5][5]int
 
-const freeSpace = 0 // sentinel for the free center cell
-
-// generateCard produces a fresh, valid, randomized bingo card.
+// generateCard creates a randomized 5x5 card containing
+// every number from 1 through 25 exactly once.
 func generateCard() Card {
-	var c Card
-	for col := 0; col < 5; col++ {
-		low := col*15 + 1
-		high := col*15 + 15
-		nums := rand.Perm(high - low + 1) // 0..14 shuffled
-		picked := 0
-		for row := 0; row < 5; row++ {
-			if col == 2 && row == 2 {
-				c[row][col] = freeSpace
-				continue
-			}
-			c[row][col] = low + nums[picked]
-			picked++
-		}
-	}
-	return c
-}
+	var card Card
 
-// marks returns a 5x5 bool grid: true where the card's number has been
-// called (or is the free space). This is recomputed server-side from the
-// canonical called-numbers set, so a client can never fake a mark.
-func (c Card) marks(called map[int]bool) [5][5]bool {
-	var m [5][5]bool
-	for r := 0; r < 5; r++ {
+	numbers := rand.Perm(25)
+
+	index := 0
+
+	for row := 0; row < 5; row++ {
 		for col := 0; col < 5; col++ {
-			if c[r][col] == freeSpace || called[c[r][col]] {
-				m[r][col] = true
+			card[row][col] = numbers[index] + 1
+			index++
+		}
+	}
+
+	return card
+}
+
+// marks returns a 5x5 grid indicating which numbers
+// have already been called.
+//
+// This will be used in later phases.
+func (c Card) marks(called map[int]bool) [5][5]bool {
+	var marked [5][5]bool
+
+	for row := 0; row < 5; row++ {
+		for col := 0; col < 5; col++ {
+			number := c[row][col]
+
+			if called[number] {
+				marked[row][col] = true
 			}
 		}
 	}
-	return m
+
+	return marked
 }
 
-// hasBingo checks all standard win patterns: 5 rows, 5 columns, 2 diagonals.
+// hasBingo checks the standard 5x5 winning patterns:
+//
+// - 5 rows
+// - 5 columns
+// - top-left to bottom-right diagonal
+// - top-right to bottom-left diagonal
+//
+// This is included now so Phase 2/3 can use it.
+// Phase 1 does not call this function yet.
 func (c Card) hasBingo(called map[int]bool) bool {
-	m := c.marks(called)
+	marked := c.marks(called)
 
-	for r := 0; r < 5; r++ {
-		if m[r][0] && m[r][1] && m[r][2] && m[r][3] && m[r][4] {
+	// Rows.
+	for row := 0; row < 5; row++ {
+		complete := true
+
+		for col := 0; col < 5; col++ {
+			if !marked[row][col] {
+				complete = false
+				break
+			}
+		}
+
+		if complete {
 			return true
 		}
 	}
+
+	// Columns.
 	for col := 0; col < 5; col++ {
-		if m[0][col] && m[1][col] && m[2][col] && m[3][col] && m[4][col] {
+		complete := true
+
+		for row := 0; row < 5; row++ {
+			if !marked[row][col] {
+				complete = false
+				break
+			}
+		}
+
+		if complete {
 			return true
 		}
 	}
-	if m[0][0] && m[1][1] && m[2][2] && m[3][3] && m[4][4] {
+
+	// Main diagonal.
+	complete := true
+
+	for i := 0; i < 5; i++ {
+		if !marked[i][i] {
+			complete = false
+			break
+		}
+	}
+
+	if complete {
 		return true
 	}
-	if m[0][4] && m[1][3] && m[2][2] && m[3][1] && m[4][0] {
-		return true
+
+	// Opposite diagonal.
+	complete = true
+
+	for i := 0; i < 5; i++ {
+		if !marked[i][4-i] {
+			complete = false
+			break
+		}
 	}
-	return false
+
+	return complete
 }

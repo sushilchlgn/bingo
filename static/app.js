@@ -1,186 +1,772 @@
-// --- State ---
+// ============================================================
+// CONNECTION STATE
+// ============================================================
+
 let ws = null;
+
 let myPlayerId = null;
+
 let isHost = false;
-let card = null;              // 5x5 array from server
-let calledNumbers = new Set();
+
+let myReady = false;
+
+let card = null;
+
 let roomCode = null;
 
-// --- DOM refs ---
-const screenJoin = document.getElementById('screen-join');
-const screenGame = document.getElementById('screen-game');
-const nameInput = document.getElementById('nameInput');
-const codeInput = document.getElementById('codeInput');
-const createBtn = document.getElementById('createBtn');
-const joinBtn = document.getElementById('joinBtn');
-const joinError = document.getElementById('joinError');
+let roundId = 0;
 
-const roomCodeDisplay = document.getElementById('roomCodeDisplay');
-const statusDisplay = document.getElementById('statusDisplay');
-const hostControls = document.getElementById('hostControls');
-const startBtn = document.getElementById('startBtn');
-const callBtn = document.getElementById('callBtn');
-const bingoBtn = document.getElementById('bingoBtn');
-const grid = document.getElementById('grid');
-const lastCalled = document.getElementById('lastCalled');
-const callHistory = document.getElementById('callHistory');
-const playerList = document.getElementById('playerList');
-const toast = document.getElementById('toast');
 
-function showToast(msg, ms = 3000) {
-  toast.textContent = msg;
-  toast.style.display = 'block';
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => (toast.style.display = 'none'), ms);
+// ============================================================
+// DOM
+// ============================================================
+
+const screenJoin =
+  document.getElementById("screen-join");
+
+const screenGame =
+  document.getElementById("screen-game");
+
+const nameInput =
+  document.getElementById("nameInput");
+
+const codeInput =
+  document.getElementById("codeInput");
+
+const createBtn =
+  document.getElementById("createBtn");
+
+const joinBtn =
+  document.getElementById("joinBtn");
+
+const joinError =
+  document.getElementById("joinError");
+
+const roomCodeDisplay =
+  document.getElementById("roomCodeDisplay");
+
+const statusDisplay =
+  document.getElementById("statusDisplay");
+
+const hostControls =
+  document.getElementById("hostControls");
+
+const readyBtn =
+  document.getElementById("readyBtn");
+
+const startBtn =
+  document.getElementById("startBtn");
+
+const waitingArea =
+  document.getElementById("waitingArea");
+
+const gameArea =
+  document.getElementById("gameArea");
+
+const readyStatus =
+  document.getElementById("readyStatus");
+
+const grid =
+  document.getElementById("grid");
+
+const playerList =
+  document.getElementById("playerList");
+
+const roomStatus =
+  document.getElementById("roomStatus");
+
+const toast =
+  document.getElementById("toast");
+
+
+// ============================================================
+// TOAST
+// ============================================================
+
+function showToast(message, duration = 3000) {
+  toast.textContent = message;
+
+  toast.style.display = "block";
+
+  clearTimeout(showToast.timer);
+
+  showToast.timer = setTimeout(() => {
+    toast.style.display = "none";
+  }, duration);
 }
 
-// --- Room creation / joining ---
+
+// ============================================================
+// CREATE ROOM
+// ============================================================
+
 createBtn.onclick = async () => {
   const name = nameInput.value.trim();
-  if (!name) { joinError.textContent = 'Enter your name first.'; return; }
-  const res = await fetch('/api/rooms', { method: 'POST' });
-  const data = await res.json();
-  connect(data.code, name);
+
+  if (!name) {
+    joinError.textContent =
+      "Enter your name first.";
+
+    return;
+  }
+
+  createBtn.disabled = true;
+
+  try {
+    const response = await fetch(
+      "/api/rooms",
+      {
+        method: "POST",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        "Could not create room."
+      );
+    }
+
+    const data = await response.json();
+
+    connect(
+      data.code,
+      name
+    );
+
+  } catch (error) {
+    joinError.textContent =
+      error.message ||
+      "Could not create room.";
+
+    createBtn.disabled = false;
+  }
 };
+
+
+// ============================================================
+// JOIN ROOM
+// ============================================================
 
 joinBtn.onclick = () => {
-  const name = nameInput.value.trim();
-  const code = codeInput.value.trim().toUpperCase();
-  if (!name) { joinError.textContent = 'Enter your name first.'; return; }
-  if (!code) { joinError.textContent = 'Enter a room code.'; return; }
-  connect(code, name);
+  const name =
+    nameInput.value.trim();
+
+  const code =
+    codeInput.value
+      .trim()
+      .toUpperCase();
+
+  if (!name) {
+    joinError.textContent =
+      "Enter your name first.";
+
+    return;
+  }
+
+  if (!code) {
+    joinError.textContent =
+      "Enter a room code.";
+
+    return;
+  }
+
+  connect(
+    code,
+    name
+  );
 };
 
+
+// ============================================================
+// WEBSOCKET CONNECTION
+// ============================================================
+
 function connect(code, name) {
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${protocol}://${location.host}/ws?room=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`);
 
-  ws.onopen = () => { joinError.textContent = ''; };
-  ws.onerror = () => { joinError.textContent = 'Could not connect. Check the room code.'; };
-  ws.onclose = () => { showToast('Disconnected from server.'); };
-  ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
-}
+  const protocol =
+    location.protocol === "https:"
+      ? "wss"
+      : "ws";
 
-// --- Message handling ---
-function handleMessage(msg) {
-  switch (msg.type) {
-    case 'welcome':
-      myPlayerId = msg.playerId;
-      isHost = msg.isHost;
-      card = msg.card;
-      roomCode = msg.roomCode;
-      enterGameScreen();
-      break;
+  const url =
+    `${protocol}://${location.host}/ws` +
+    `?room=${encodeURIComponent(code)}` +
+    `&name=${encodeURIComponent(name)}`;
 
-    case 'room_state':
-      renderPlayers(msg.players);
-      statusDisplay.textContent = statusLabel(msg.status);
-      const me = msg.players.find(p => p.id === myPlayerId);
-      if (me) isHost = me.isHost;
-      hostControls.style.display = isHost ? 'block' : 'none';
-      startBtn.style.display = (isHost && msg.status === 'waiting') ? 'inline-block' : 'none';
-      callBtn.style.display = (isHost && msg.status === 'playing') ? 'inline-block' : 'none';
-      break;
+  ws = new WebSocket(url);
 
-    case 'call_history':
-      calledNumbers = new Set(msg.calledNumbers);
-      renderCallHistory(msg.calledNumbers);
-      renderGrid();
-      break;
+  ws.onopen = () => {
+    joinError.textContent = "";
 
-    case 'number_called':
-      calledNumbers.add(msg.number);
-      lastCalled.textContent = formatCall(msg.number);
-      renderCallHistory(msg.calledNumbers);
-      renderGrid();
-      bingoBtn.disabled = false;
-      break;
+    showToast(
+      "Connected to room."
+    );
+  };
 
-    case 'bingo_result':
-      if (!msg.valid) showToast(msg.message || 'Not a bingo yet.');
-      break;
+  ws.onerror = () => {
+    joinError.textContent =
+      "Could not connect to the room.";
 
-    case 'game_over':
-      statusDisplay.textContent = `🏆 ${msg.winnerName} won!`;
-      showToast(msg.winnerId === myPlayerId ? '🎉 You got BINGO!' : `${msg.winnerName} got BINGO!`, 6000);
-      bingoBtn.disabled = true;
-      callBtn.style.display = 'none';
-      break;
+    createBtn.disabled = false;
+  };
 
-    case 'promoted_to_host':
-      isHost = true;
-      showToast('The host left — you are now the host.');
-      hostControls.style.display = 'block';
-      break;
-  }
-}
+  ws.onclose = () => {
+    showToast(
+      "Disconnected from server."
+    );
+  };
 
-function statusLabel(s) {
-  if (s === 'waiting') return 'Waiting for host to start…';
-  if (s === 'playing') return 'Game in progress';
-  if (s === 'finished') return 'Game over';
-  return '';
-}
+  ws.onmessage = event => {
 
-function formatCall(n) {
-  const col = Math.floor((n - 1) / 15);
-  const letter = ['B', 'I', 'N', 'G', 'O'][col];
-  return `${letter}-${n}`;
-}
+    let message;
 
-// --- Rendering ---
-function enterGameScreen() {
-  screenJoin.style.display = 'none';
-  screenGame.style.display = 'block';
-  roomCodeDisplay.textContent = roomCode;
-  renderGrid();
-}
+    try {
+      message =
+        JSON.parse(event.data);
 
-function renderGrid() {
-  grid.innerHTML = '';
-  for (let r = 0; r < 5; r++) {
-    for (let c = 0; c < 5; c++) {
-      const val = card[r][c];
-      const div = document.createElement('div');
-      div.className = 'cell';
-      if (val === 0) {
-        div.classList.add('free');
-        div.textContent = '★';
-      } else {
-        div.textContent = val;
-        if (calledNumbers.has(val)) div.classList.add('marked');
-      }
-      grid.appendChild(div);
+    } catch {
+      showToast(
+        "Received invalid server message."
+      );
+
+      return;
     }
+
+    handleMessage(message);
+  };
+}
+
+
+// ============================================================
+// MESSAGE HANDLING
+// ============================================================
+
+function handleMessage(msg) {
+
+  switch (msg.type) {
+
+    // --------------------------------------------------------
+    // WELCOME
+    // --------------------------------------------------------
+
+    case "welcome":
+
+      myPlayerId =
+        msg.playerId;
+
+      isHost =
+        msg.isHost;
+
+      myReady =
+        msg.ready;
+
+      roomCode =
+        msg.roomCode;
+
+      roundId =
+        Number(msg.roundId || 0);
+
+      card =
+        msg.card || null;
+
+      enterGameScreen();
+
+      break;
+
+
+    // --------------------------------------------------------
+    // ROOM STATE
+    // --------------------------------------------------------
+
+    case "room_state":
+
+      if (
+        msg.roundId !== undefined &&
+        Number(msg.roundId) < roundId
+      ) {
+        return;
+      }
+
+      if (
+        msg.roundId !== undefined
+      ) {
+        roundId =
+          Number(msg.roundId);
+      }
+
+      renderPlayers(
+        msg.players || []
+      );
+
+      updateRoomState(
+        msg.status
+      );
+
+      break;
+
+
+    // --------------------------------------------------------
+    // GAME STARTED
+    // --------------------------------------------------------
+
+    case "game_started":
+
+      roundId =
+        Number(
+          msg.roundId ||
+          roundId
+        );
+
+      showToast(
+        "🎮 Game started!"
+      );
+
+      updateRoomState(
+        "playing"
+      );
+
+      renderGrid();
+
+      break;
+
+
+    // --------------------------------------------------------
+    // PROMOTED TO HOST
+    // --------------------------------------------------------
+
+    case "promoted_to_host":
+
+      isHost = true;
+
+      updateHostControls();
+
+      showToast(
+        "You are now the host."
+      );
+
+      break;
+
+
+    // --------------------------------------------------------
+    // ERROR
+    // --------------------------------------------------------
+
+    case "error":
+
+      showToast(
+        msg.message ||
+        "Something went wrong."
+      );
+
+      break;
+
+
+    default:
+
+      console.warn(
+        "Unknown message:",
+        msg
+      );
   }
 }
 
-function renderCallHistory(order) {
-  callHistory.innerHTML = '';
-  order.slice().reverse().forEach(n => {
-    const span = document.createElement('span');
-    span.textContent = formatCall(n);
-    callHistory.appendChild(span);
-  });
-  lastCalled.textContent = order.length ? formatCall(order[order.length - 1]) : '—';
+
+// ============================================================
+// ENTER GAME SCREEN
+// ============================================================
+
+function enterGameScreen() {
+
+  screenJoin.classList.add(
+    "hidden"
+  );
+
+  screenGame.classList.remove(
+    "hidden"
+  );
+
+  roomCodeDisplay.textContent =
+    roomCode;
+
+  renderGrid();
+
+  updateHostControls();
 }
+
+
+// ============================================================
+// ROOM STATUS
+// ============================================================
+
+function updateRoomState(status) {
+
+  if (status === "waiting") {
+
+    statusDisplay.textContent =
+      "Waiting for players...";
+
+    roomStatus.textContent =
+      "Waiting for players";
+
+    waitingArea.classList.remove(
+      "hidden"
+    );
+
+    gameArea.classList.add(
+      "hidden"
+    );
+
+  }
+
+  else if (status === "playing") {
+
+    statusDisplay.textContent =
+      "Game in progress";
+
+    roomStatus.textContent =
+      "Game in progress";
+
+    waitingArea.classList.add(
+      "hidden"
+    );
+
+    gameArea.classList.remove(
+      "hidden"
+    );
+
+  }
+
+  else if (status === "finished") {
+
+    statusDisplay.textContent =
+      "Game finished";
+
+    roomStatus.textContent =
+      "Game finished";
+
+    waitingArea.classList.add(
+      "hidden"
+    );
+
+    gameArea.classList.remove(
+      "hidden"
+    );
+  }
+
+  updateHostControls();
+}
+
+
+// ============================================================
+// HOST CONTROLS
+// ============================================================
+
+function updateHostControls() {
+
+  if (isHost) {
+
+    hostControls.classList.remove(
+      "hidden"
+    );
+
+  } else {
+
+    hostControls.classList.add(
+      "hidden"
+    );
+  }
+
+  readyBtn.textContent =
+    myReady
+      ? "Not Ready"
+      : "Ready";
+
+  // The Start button itself is only useful for host.
+  if (isHost) {
+    startBtn.classList.remove(
+      "hidden"
+    );
+  } else {
+    startBtn.classList.add(
+      "hidden"
+    );
+  }
+}
+
+
+// ============================================================
+// READY BUTTON
+// ============================================================
+
+readyBtn.onclick = () => {
+
+  if (!ws) {
+    return;
+  }
+
+  if (
+    ws.readyState !==
+    WebSocket.OPEN
+  ) {
+    showToast(
+      "Not connected."
+    );
+
+    return;
+  }
+
+  ws.send(
+    JSON.stringify({
+      type: "set_ready",
+    })
+  );
+};
+
+
+// ============================================================
+// START BUTTON
+// ============================================================
+
+startBtn.onclick = () => {
+
+  if (!ws) {
+    return;
+  }
+
+  if (
+    ws.readyState !==
+    WebSocket.OPEN
+  ) {
+    showToast(
+      "Not connected."
+    );
+
+    return;
+  }
+
+  ws.send(
+    JSON.stringify({
+      type: "start_game",
+      roundId: roundId,
+    })
+  );
+};
+
+
+// ============================================================
+// PLAYER LIST
+// ============================================================
 
 function renderPlayers(players) {
-  playerList.innerHTML = '';
-  players.forEach(p => {
-    const li = document.createElement('li');
-    li.textContent = p.name;
-    if (p.isHost) {
-      const tag = document.createElement('span');
-      tag.className = 'host-tag';
-      tag.textContent = '(host)';
-      li.appendChild(tag);
+
+  playerList.innerHTML = "";
+
+  const me =
+    players.find(
+      player =>
+        player.id === myPlayerId
+    );
+
+  if (me) {
+
+    myReady =
+      Boolean(me.ready);
+
+    isHost =
+      Boolean(me.isHost);
+  }
+
+  for (const player of players) {
+
+    const li =
+      document.createElement("li");
+
+    li.textContent =
+      player.name;
+
+    if (player.isHost) {
+
+      const hostTag =
+        document.createElement("span");
+
+      hostTag.className =
+        "player-host";
+
+      hostTag.textContent =
+        "(host)";
+
+      li.appendChild(
+        hostTag
+      );
     }
-    playerList.appendChild(li);
-  });
+
+    const readyTag =
+      document.createElement("span");
+
+    if (player.ready) {
+
+      readyTag.className =
+        "player-ready";
+
+      readyTag.textContent =
+        "✓ ready";
+
+    } else {
+
+      readyTag.className =
+        "player-not-ready";
+
+      readyTag.textContent =
+        "not ready";
+    }
+
+    li.appendChild(
+      readyTag
+    );
+
+    playerList.appendChild(
+      li
+    );
+  }
+
+  updateReadyStatus(
+    players
+  );
+
+  updateHostControls();
 }
 
-// --- Controls ---
-startBtn.onclick = () => ws.send(JSON.stringify({ type: 'start_game' }));
-callBtn.onclick = () => ws.send(JSON.stringify({ type: 'call_number' }));
-bingoBtn.onclick = () => ws.send(JSON.stringify({ type: 'claim_bingo' }));
+
+// ============================================================
+// READY STATUS
+// ============================================================
+
+function updateReadyStatus(players) {
+
+  if (!players.length) {
+    readyStatus.textContent = "";
+    return;
+  }
+
+  const readyCount =
+    players.filter(
+      player =>
+        player.ready
+    ).length;
+
+  const total =
+    players.length;
+
+  if (readyCount === total) {
+
+    readyStatus.textContent =
+      `✓ All ${total} players are ready.`;
+
+  } else {
+
+    readyStatus.textContent =
+      `${readyCount}/${total} players ready.`;
+  }
+}
+
+
+// ============================================================
+// CARD
+// ============================================================
+
+function renderGrid() {
+
+  grid.innerHTML = "";
+
+  if (!card) {
+    return;
+  }
+
+  for (
+    let row = 0;
+    row < 5;
+    row++
+  ) {
+
+    for (
+      let col = 0;
+      col < 5;
+      col++
+    ) {
+
+      const number =
+        card[row][col];
+
+      const cell =
+        document.createElement("div");
+
+      cell.className =
+        "cell";
+
+      cell.textContent =
+        number;
+
+      grid.appendChild(
+        cell
+      );
+    }
+  }
+}
+
+
+// ============================================================
+// ROOM CODE COPY
+// ============================================================
+
+roomCodeDisplay.onclick = async () => {
+
+  if (!roomCode) {
+    return;
+  }
+
+  try {
+
+    await navigator.clipboard.writeText(
+      roomCode
+    );
+
+    showToast(
+      "Room code copied."
+    );
+
+  } catch {
+
+    showToast(
+      `Room code: ${roomCode}`
+    );
+  }
+};
+
+
+// ============================================================
+// ENTER KEY SUPPORT
+// ============================================================
+
+nameInput.addEventListener(
+  "keydown",
+  event => {
+
+    if (
+      event.key === "Enter"
+    ) {
+      createBtn.click();
+    }
+  }
+);
+
+codeInput.addEventListener(
+  "keydown",
+  event => {
+
+    if (
+      event.key === "Enter"
+    ) {
+      joinBtn.click();
+    }
+  }
+);
