@@ -1,4 +1,4 @@
 window.BINGO_CONFIG = {
-  backendUrl: "bingo-production-3811.up.railway.app"
+  backendUrl: "https://bingo-production-3811.up.railway.app"
 };
 
