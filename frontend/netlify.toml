@@ -1,5 +1,5 @@
 [build]
-  publish = "static"
+  publish = "frontend"
 
 # The Go WebSocket/API server is deployed separately.
 # Set static/config.js backendUrl to that server's HTTPS URL before publishing.
