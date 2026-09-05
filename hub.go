@@ -1,10 +1,13 @@
 package main
 
 import (
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/big"
+	mathrand "math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,34 +16,31 @@ import (
 )
 
 const (
-	// Maximum number of players in one room.
-	MaxPlayersPerRoom = 25
-
-	// Minimum number of players required to start.
-	MinPlayersToStart = 2
-
-	// Size of each player's outgoing message queue.
-	SendQueueSize = 64
+	MaxPlayersPerRoom     = 5
+	SendQueueSize         = 64
+	MinPlayersToStart     = 2
+	DisconnectGracePeriod = 45 * time.Second
 )
 
-// Player represents one connected player.
+var (
+	errInvalidCard     = errors.New("card must contain every number from 1 to 25 exactly once")
+	errDuplicateNumber = errors.New("card contains a duplicate number")
+)
+
 type Player struct {
-	ID   string
-	Name string
-	Conn *websocket.Conn
-
-	// Every player gets their own private card.
-	Card Card
-
-	// Ready means the player has finished preparing
-	// and is ready for the host to start the game.
-	Ready bool
-
-	// The first player in the room becomes host.
-	IsHost bool
-
-	// Used for deterministic host promotion.
+	ID      string
+	Name    string
+	Conn    *websocket.Conn
+	Card    Card
+	Ready   bool
+	IsHost  bool
 	JoinSeq uint64
+
+	SessionToken      string
+	Connected         bool
+	DisconnectedUntil time.Time
+	IntentionalLeave  bool
+	disconnectTimer   *time.Timer
 
 	sendCh    chan interface{}
 	done      chan struct{}
@@ -48,66 +48,47 @@ type Player struct {
 	closed    atomic.Bool
 }
 
-// newPlayer creates a new player.
-func newPlayer(
-	conn *websocket.Conn,
-	id string,
-	name string,
-	joinSeq uint64,
-) *Player {
+func newPlayer(conn *websocket.Conn, id, name string, joinSeq uint64) *Player {
 	return &Player{
-		ID:      id,
-		Name:    name,
-		Conn:    conn,
-		JoinSeq: joinSeq,
-
-		sendCh: make(chan interface{}, SendQueueSize),
-		done:   make(chan struct{}),
+		ID:           id,
+		Name:         name,
+		Conn:         conn,
+		JoinSeq:      joinSeq,
+		SessionToken: randomCode(32),
+		Connected:    true,
+		sendCh:       make(chan interface{}, SendQueueSize),
+		done:         make(chan struct{}),
 	}
 }
 
-// send places a message into the player's outgoing queue.
-//
-// The actual WebSocket write happens inside writePump.
 func (p *Player) send(v interface{}) bool {
 	if p.closed.Load() {
 		return false
 	}
-
 	select {
 	case <-p.done:
 		return false
-
 	case p.sendCh <- v:
 		return true
-
 	default:
-		log.Printf(
-			"send queue full for player %s (%s); closing connection",
-			p.ID,
-			p.Name,
-		)
-
+		log.Printf("send queue full for player %s (%s); closing connection", p.ID, p.Name)
 		p.close()
 		return false
 	}
 }
 
-// close safely closes the player connection.
 func (p *Player) close() {
 	p.closeOnce.Do(func() {
 		p.closed.Store(true)
-
 		close(p.done)
-
-		_ = p.Conn.Close()
+		if p.Conn != nil {
+			_ = p.Conn.Close()
+		}
 	})
 }
 
-// writePump is the only goroutine that writes to the WebSocket.
 func (p *Player) writePump() {
 	defer p.close()
-
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
 
@@ -115,285 +96,304 @@ func (p *Player) writePump() {
 		select {
 		case <-p.done:
 			return
-
 		case msg := <-p.sendCh:
-			if err := p.Conn.SetWriteDeadline(
-				time.Now().Add(writeWait),
-			); err != nil {
+			if err := p.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 				return
 			}
-
 			if err := p.Conn.WriteJSON(msg); err != nil {
-				log.Printf(
-					"write error to %s: %v",
-					p.Name,
-					err,
-				)
-
+				log.Printf("write error to %s: %v", p.Name, err)
 				return
 			}
-
 		case <-ticker.C:
-			if err := p.Conn.SetWriteDeadline(
-				time.Now().Add(writeWait),
-			); err != nil {
+			if err := p.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 				return
 			}
-
-			if err := p.Conn.WriteControl(
-				websocket.PingMessage,
-				nil,
-				time.Now().Add(writeWait),
-			); err != nil {
-				log.Printf(
-					"ping error to %s: %v",
-					p.Name,
-					err,
-				)
-
+			if err := p.Conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
+				log.Printf("ping error to %s: %v", p.Name, err)
 				return
 			}
 		}
 	}
 }
 
-// GameStatus describes the room lifecycle.
 type GameStatus string
 
 const (
-	// Players can join and change ready state.
-	StatusWaiting GameStatus = "waiting"
-
-	// Game has started.
-	// New players cannot join.
-	StatusPlaying GameStatus = "playing"
-
-	// Game has ended.
+	StatusWaiting  GameStatus = "waiting"
+	StatusPlaying  GameStatus = "playing"
 	StatusFinished GameStatus = "finished"
 )
 
-// Room contains all server-authoritative game state.
 type Room struct {
-	Code string
-
+	Code    string
 	Players map[string]*Player
-
-	// These are prepared for the actual game in later phases.
-	Called map[int]bool
-	Order  []int
-
-	Status GameStatus
-
-	Winner string
-
+	Called  map[int]bool
+	Order   []int
+	Status  GameStatus
+	Winner  string
+	Outcome string
 	RoundID uint64
+	Paused  bool
 
-	// Used to determine host promotion order.
+	// ActivePlayerID is the only player allowed to call a number during a turn.
+	ActivePlayerID string
+
 	joinSeq uint64
-
-	mu sync.Mutex
+	mu      sync.Mutex
 }
 
-// newRoom creates an empty room.
 func newRoom(code string) *Room {
 	return &Room{
-		Code: code,
-
+		Code:    code,
 		Players: make(map[string]*Player),
-
-		Called: make(map[int]bool),
-
-		Status: StatusWaiting,
+		Called:  make(map[int]bool),
+		Status:  StatusWaiting,
 	}
 }
 
-// publicPlayer is the safe player information sent to clients.
-//
-// IMPORTANT:
-// The card is intentionally NOT included here.
-//
-// A player's card must remain private during the game.
 type publicPlayer struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	IsHost bool   `json:"isHost"`
-	Ready  bool   `json:"ready"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	IsHost           bool   `json:"isHost"`
+	Ready            bool   `json:"ready"`
+	CardComplete     bool   `json:"cardComplete"`
+	BingoCount       int    `json:"bingoCount"`
+	BingoProgress    string `json:"bingoProgress"`
+	Connected        bool   `json:"connected"`
+	ReconnectSeconds int    `json:"reconnectSeconds"`
 }
 
-// publicPlayers creates a client-safe player list.
-//
-// Caller must hold r.mu.
 func (r *Room) publicPlayers() []publicPlayer {
-	out := make(
-		[]publicPlayer,
-		0,
-		len(r.Players),
-	)
-
-	for _, p := range r.Players {
+	out := make([]publicPlayer, 0, len(r.Players))
+	players := r.sortedPlayers()
+	for _, p := range players {
+		count := p.Card.completedLineCount(r.Called)
+		if count > BingoLines {
+			count = BingoLines
+		}
 		out = append(out, publicPlayer{
-			ID:     p.ID,
-			Name:   p.Name,
-			IsHost: p.IsHost,
-			Ready:  p.Ready,
+			ID:               p.ID,
+			Name:             p.Name,
+			IsHost:           p.IsHost,
+			Ready:            p.Ready,
+			CardComplete:     p.Card.isComplete(),
+			BingoCount:       count,
+			BingoProgress:    "BINGO"[:count],
+			Connected:        p.Connected,
+			ReconnectSeconds: reconnectSeconds(p),
 		})
 	}
-
 	return out
 }
 
-// playerSnapshot returns all players.
-//
-// Caller must hold r.mu.
-func (r *Room) playerSnapshot() []*Player {
-	out := make(
-		[]*Player,
-		0,
-		len(r.Players),
-	)
-
+func (r *Room) sortedPlayers() []*Player {
+	out := make([]*Player, 0, len(r.Players))
 	for _, p := range r.Players {
 		out = append(out, p)
 	}
-
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].JoinSeq < out[j].JoinSeq
+	})
 	return out
 }
 
-// broadcast sends a message to every current player.
-//
-// Caller must hold r.mu.
 func (r *Room) broadcast(v interface{}) {
 	for _, p := range r.Players {
 		p.send(v)
 	}
 }
 
-// broadcastRoomState broadcasts the current room state.
-//
-// Caller must hold r.mu.
+func reconnectSeconds(p *Player) int {
+	if p.Connected || p.DisconnectedUntil.IsZero() {
+		return 0
+	}
+	remaining := int(time.Until(p.DisconnectedUntil).Seconds())
+	if remaining < 0 {
+		return 0
+	}
+	return remaining + 1
+}
+
 func (r *Room) broadcastRoomState() {
+	readyCount := 0
+	for _, p := range r.Players {
+		if p.Ready {
+			readyCount++
+		}
+	}
+
 	r.broadcast(map[string]interface{}{
-		"type":    "room_state",
-		"players": r.publicPlayers(),
-		"status":  r.Status,
-		"roundId": r.RoundID,
+		"type":           "room_state",
+		"players":        r.publicPlayers(),
+		"status":         r.Status,
+		"roundId":        r.RoundID,
+		"activePlayerId": r.ActivePlayerID,
+		"readyCount":     readyCount,
+		"playerCount":    len(r.Players),
+		"calledNumbers":  append([]int(nil), r.Order...),
+		"paused":         r.Paused,
+		"outcome":        r.Outcome,
 	})
 }
 
-// nextJoinSeq returns the next player ordering number.
-//
-// Caller must hold r.mu.
 func (r *Room) nextJoinSeq() uint64 {
 	r.joinSeq++
-
 	return r.joinSeq
 }
 
-// oldestPlayer returns the earliest joined player.
-//
-// Used when the host leaves.
-//
-// Caller must hold r.mu.
 func (r *Room) oldestPlayer() *Player {
 	var oldest *Player
-
 	for _, p := range r.Players {
+		if !p.Connected {
+			continue
+		}
 		if oldest == nil || p.JoinSeq < oldest.JoinSeq {
 			oldest = p
 		}
 	}
-
 	return oldest
 }
 
-// Hub contains all rooms.
-type Hub struct {
-	mu sync.Mutex
+func (r *Room) findDisconnectedByTokenLocked(token string) *Player {
+	if token == "" {
+		return nil
+	}
+	for _, p := range r.Players {
+		if !p.Connected && p.SessionToken == token && time.Now().Before(p.DisconnectedUntil) {
+			return p
+		}
+	}
+	return nil
+}
 
+func (r *Room) connectedPlayerCountLocked() int {
+	count := 0
+	for _, p := range r.Players {
+		if p.Connected {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *Room) hasDisconnectedLocked() bool {
+	for _, p := range r.Players {
+		if !p.Connected {
+			return true
+		}
+	}
+	return false
+}
+
+// advanceTurnLocked selects the next connected player after currentID.
+// Caller must hold r.mu.
+func (r *Room) advanceTurnLocked(currentID string) {
+	players := r.sortedPlayers()
+	if len(players) == 0 {
+		r.ActivePlayerID = ""
+		return
+	}
+
+	if currentID == "" {
+		r.ActivePlayerID = players[0].ID
+		return
+	}
+
+	for i, p := range players {
+		if p.ID == currentID {
+			next := (i + 1) % len(players)
+			r.ActivePlayerID = players[next].ID
+			return
+		}
+	}
+
+	// Current player disconnected; pick the first remaining player.
+	r.ActivePlayerID = players[0].ID
+}
+
+func (r *Room) allReady() bool {
+	if r.connectedPlayerCountLocked() < MinPlayersToStart {
+		return false
+	}
+	for _, p := range r.Players {
+		if !p.Connected || !p.Ready || !p.Card.isComplete() {
+			return false
+		}
+	}
+	return true
+}
+
+type Hub struct {
+	mu    sync.Mutex
 	rooms map[string]*Room
 }
 
-// newHub creates a new room hub.
 func newHub() *Hub {
-	return &Hub{
-		rooms: make(map[string]*Room),
-	}
+	return &Hub{rooms: make(map[string]*Room)}
 }
 
-// Characters used for room codes.
-//
-// Ambiguous characters are removed:
-//
-// 0/O
-// 1/I
 const codeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-// randomCode creates a cryptographically random code.
 func randomCode(n int) string {
 	b := make([]byte, n)
-
 	for i := range b {
-		index, err := rand.Int(
-			rand.Reader,
-			big.NewInt(int64(len(codeChars))),
-		)
-
-		if err != nil {
-			panic(err)
-		}
-
-		b[i] = codeChars[index.Int64()]
+		idx, _ := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(codeChars))))
+		b[i] = codeChars[idx.Int64()]
 	}
-
 	return string(b)
 }
 
-// createRoom creates a unique five-character room.
 func (h *Hub) createRoom() *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	var code string
 	for {
-		code := randomCode(5)
-
-		if _, exists := h.rooms[code]; exists {
-			continue
+		code = randomCode(5)
+		if _, exists := h.rooms[code]; !exists {
+			break
 		}
-
-		room := newRoom(code)
-
-		h.rooms[code] = room
-
-		return room
 	}
+
+	r := newRoom(code)
+	h.rooms[code] = r
+	return r
 }
 
-// getRoom finds a room.
 func (h *Hub) getRoom(code string) (*Room, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	room, ok := h.rooms[code]
-
-	return room, ok
+	r, ok := h.rooms[code]
+	return r, ok
 }
 
-// deleteRoom removes a room.
 func (h *Hub) deleteRoom(code string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
 	delete(h.rooms, code)
 }
 
-// newPlayerID creates a random player ID.
 func newPlayerID() string {
 	return randomCode(10)
 }
 
-// mustJSON is kept as a small utility for future phases.
 func mustJSON(v interface{}) []byte {
 	b, _ := json.Marshal(v)
+	return b
+}
 
+// randomPlayerIndex uses math/rand only for selecting the first turn. It does not
+// affect any authoritative card/number validation.
+func randomPlayerIndex(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	return mathrand.Intn(n)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
 	return b
 }

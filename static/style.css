@@ -178,7 +178,8 @@ input:focus {
 /* HEADER */
 /* ========================================================= */
 
-.top-bar {
+.top-bar,
+.topbar {
   display: flex;
 
   justify-content: space-between;
@@ -224,12 +225,34 @@ input:focus {
   color: var(--muted);
 }
 
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 #hostControls {
   display: flex;
-
   gap: 8px;
-
   align-items: center;
+}
+
+.bingo-progress {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.bingo-progress.complete {
+  color: var(--ready);
+  border-color: var(--ready);
+  background: rgba(34, 197, 94, 0.1);
 }
 
 
@@ -458,7 +481,8 @@ input:focus {
     padding: 20px;
   }
 
-  .top-bar {
+  .top-bar,
+  .topbar {
     align-items: flex-start;
   }
 
@@ -468,6 +492,11 @@ input:focus {
 
   #hostControls button {
     flex: 1;
+  }
+
+  .topbar > .row {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .layout {

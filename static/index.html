@@ -1,226 +1,500 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bingo 1–25</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel2: #0b1220;
+      --accent: #38bdf8;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --line: #334155
+    }
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+    * {
+      box-sizing: border-box
+    }
 
-  <title>Bingo</title>
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh
+    }
 
-  <link rel="stylesheet" href="style.css">
+    button,
+    input {
+      font: inherit
+    }
+
+    button {
+      border: 0;
+      border-radius: 9px;
+      padding: 10px 15px;
+      background: var(--accent);
+      color: #062235;
+      font-weight: 700;
+      cursor: pointer
+    }
+
+    button:hover {
+      filter: brightness(1.08)
+    }
+
+    button:disabled {
+      opacity: .4;
+      cursor: not-allowed
+    }
+
+    button.secondary {
+      background: var(--line);
+      color: var(--text)
+    }
+
+    button.danger {
+      background: #7f1d1d;
+      color: #fee2e2
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: auto;
+      padding: 24px 16px
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0
+    }
+
+    .muted {
+      color: var(--muted)
+    }
+
+    #screen-game {
+      display: none
+    }
+
+    .join {
+      max-width: 390px;
+      margin: 70px auto
+    }
+
+    .join .panel {
+      padding: 22px
+    }
+
+    input {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--panel2);
+      color: var(--text);
+      outline: none;
+      margin: 6px 0 14px
+    }
+
+    input:focus {
+      border-color: var(--accent)
+    }
+
+    .row {
+      display: flex;
+      gap: 10px
+    }
+
+    .row>* {
+      flex: 1
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px
+    }
+
+    .room {
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .code {
+      background: var(--panel);
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-weight: 800;
+      letter-spacing: 3px
+    }
+
+    .status {
+      color: var(--muted)
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 18px
+    }
+
+    .panel {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px
+    }
+
+    .panel h3 {
+      margin-bottom: 12px
+    }
+
+    .bingo-head,
+    .bingo-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      width: 100%;
+      max-width: 430px
+    }
+
+    .bingo-head {
+      margin-bottom: 6px
+    }
+
+    .bingo-head div {
+      text-align: center;
+      color: var(--accent);
+      font-weight: 800;
+      padding: 4px
+    }
+
+    .cell {
+      aspect-ratio: 1;
+      background: var(--panel2);
+      border: 2px solid var(--line);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(1rem, 3vw, 1.35rem);
+      font-weight: 800;
+      cursor: pointer;
+      user-select: none
+    }
+
+    .cell.selected {
+      border-color: var(--warn)
+    }
+
+    .cell.marked {
+      background: var(--accent);
+      color: #05202e;
+      border-color: var(--accent)
+    }
+
+    .cell.empty {
+      color: #64748b
+    }
+
+    .cell.locked {
+      cursor: default
+    }
+
+    .card-actions {
+      max-width: 430px;
+      display: flex;
+      gap: 8px;
+      margin-top: 10px
+    }
+
+    .card-actions>* {
+      flex: 1
+    }
+
+    .numbers {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px
+    }
+
+    .num {
+      padding: 8px 4px;
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      font-weight: 700
+    }
+
+    .num.used {
+      opacity: .2;
+      cursor: not-allowed
+    }
+
+    .num.selected {
+      outline: 2px solid var(--accent)
+    }
+
+    .players {
+      list-style: none;
+      margin: 0;
+      padding: 0
+    }
+
+    .player {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .player:last-child {
+      border-bottom: 0
+    }
+
+    .tag {
+      font-size: .75rem;
+      color: var(--muted)
+    }
+
+    .ready {
+      color: var(--ok)
+    }
+
+    .notready {
+      color: var(--warn)
+    }
+
+    .turn {
+      color: var(--accent);
+      font-weight: 800
+    }
+
+    .game-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 430px) 1fr;
+      gap: 18px
+    }
+
+    .last {
+      font-size: 3rem;
+      text-align: center;
+      color: var(--accent);
+      font-weight: 900;
+      margin: 8px
+    }
+
+    .history {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-height: 160px;
+      overflow: auto
+    }
+
+    .history span {
+      background: var(--panel2);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: .85rem
+    }
+
+    .turn-box {
+      text-align: center;
+      font-weight: 800;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--panel2)
+    }
+
+    #toast {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      background: var(--accent);
+      color: #05202e;
+      padding: 10px 18px;
+      border-radius: 9px;
+      font-weight: 800;
+      z-index: 20
+    }
+
+    .hidden {
+      display: none !important
+    }
+
+    .final-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px
+    }
+
+    .mini-card .bingo-head,
+    .mini-card .bingo-grid {
+      width: 100%;
+      max-width: 300px;
+    }
+
+    .winner {
+      border: 2px solid var(--ok)
+    }
+
+    @media(max-width:800px) {
+
+      .layout,
+      .game-layout {
+        grid-template-columns: 1fr
+      }
+
+      .numbers {
+        grid-template-columns: repeat(5, 1fr)
+      }
+    }
+  </style>
 </head>
 
 <body>
-
-<div id="toast"></div>
-
-<main class="container">
-
-  <!-- ========================================================= -->
-  <!-- JOIN SCREEN -->
-  <!-- ========================================================= -->
-
-  <section id="screen-join" class="screen">
-
-    <div class="card-panel">
-
-      <h1>🎱 Bingo</h1>
-
-      <p class="muted">
-        Create a room or join an existing room.
-      </p>
-
-      <label for="nameInput">
-        Your name
-      </label>
-
-      <input
-        id="nameInput"
-        type="text"
-        maxlength="20"
-        placeholder="Enter your name"
-        autocomplete="off"
-      >
-
-      <button id="createBtn">
-        Create Room
-      </button>
-
-      <div class="divider">
-        OR
-      </div>
-
-      <label for="codeInput">
-        Room code
-      </label>
-
-      <input
-        id="codeInput"
-        type="text"
-        maxlength="5"
-        placeholder="ABCDE"
-        autocomplete="off"
-        style="text-transform: uppercase;"
-      >
-
-      <button id="joinBtn" class="secondary">
-        Join Room
-      </button>
-
-      <p id="joinError" class="error"></p>
-
-    </div>
-
-  </section>
-
-
-  <!-- ========================================================= -->
-  <!-- GAME SCREEN -->
-  <!-- ========================================================= -->
-
-  <section id="screen-game" class="screen hidden">
-
-    <!-- Header -->
-
-    <header class="top-bar">
-
-      <div>
-
-        <div class="room-code">
-          <span>ROOM</span>
-          <strong id="roomCodeDisplay">-----</strong>
-        </div>
-
-        <div
-          id="statusDisplay"
-          class="status"
-        >
-          Waiting...
-        </div>
-
-      </div>
-
-      <div id="hostControls">
-
-        <button
-          id="readyBtn"
-          class="secondary"
-        >
-          Ready
-        </button>
-
-        <button
-          id="startBtn"
-          class="hidden"
-        >
-          Start Game
-        </button>
-
-      </div>
-
-    </header>
-
-
-    <!-- ======================================================= -->
-    <!-- WAITING AREA -->
-    <!-- ======================================================= -->
-
-    <section
-      id="waitingArea"
-      class="waiting-area"
-    >
-
+  <div id="toast"></div>
+  <div class="wrap">
+    <section id="screen-join" class="join">
       <div class="panel">
-
-        <h2>Prepare Your Card</h2>
-
-        <p class="muted">
-          Your card is private.
-          Arrange/check your card and mark yourself ready.
-        </p>
-
-        <p id="readyStatus"></p>
-
+        <h1>🎱 Bingo</h1>
+        <p class="muted">Create a room or join one. No account, coins, XP or authentication.</p>
+        <label>Name</label>
+        <input id="nameInput" maxlength="20" placeholder="Your name" autocomplete="off">
+        <button id="createBtn" style="width:100%;margin-bottom:12px">Create Room</button>
+        <p class="muted" style="text-align:center">— or —</p>
+        <label>Room code</label>
+        <input id="codeInput" maxlength="5" placeholder="ABCDE" style="text-transform:uppercase">
+        <button id="joinBtn" class="secondary" style="width:100%">Join Room</button>
+        <p id="joinError" style="color:var(--danger)"></p>
       </div>
-
     </section>
 
-
-    <!-- ======================================================= -->
-    <!-- GAME AREA -->
-    <!-- ======================================================= -->
-
-    <section id="gameArea" class="hidden">
-
-      <div class="layout">
-
-        <!-- CARD -->
-
-        <div class="card-section">
-
-          <div class="bingo-header">
-            <div>B</div>
-            <div>I</div>
-            <div>N</div>
-            <div>G</div>
-            <div>O</div>
-          </div>
-
-          <div
-            id="grid"
-            class="bingo-grid"
-          ></div>
-
+    <section id="screen-game">
+      <div class="topbar">
+        <div class="room"><span id="roomCodeDisplay" class="code"></span><span id="statusDisplay" class="status"></span>
         </div>
-
-
-        <!-- SIDE PANEL -->
-
-        <aside class="side-section">
-
-          <div class="panel">
-
-            <div class="panel-title">
-              Room
-            </div>
-
-            <div
-              id="roomStatus"
-              class="large-status"
-            >
-              Waiting
-            </div>
-
+        <div class="row">
+          <div id="hostControls" class="row" style="display:none">
+            <button id="startBtn">Start Game</button>
+            <button id="playAgainBtn" class="secondary" style="display:none">New Game</button>
           </div>
-
-
-          <div class="panel">
-
-            <div class="panel-title">
-              Players
-            </div>
-
-            <ul
-              id="playerList"
-              class="players"
-            ></ul>
-
-          </div>
-
-        </aside>
-
+          <button id="leaveBtn" class="secondary">Leave Room</button>
+        </div>
       </div>
 
+      <div id="lobbyView" class="layout">
+        <main>
+          <div class="panel">
+            <h3>Create your 5×5 card</h3>
+            <p class="muted">Use every number <b>1–25 exactly once</b>. Click a number then a cell, drag a number onto a
+              cell, or enter a number below.</p>
+            <div class="bingo-head">
+              <div>B</div>
+              <div>I</div>
+              <div>N</div>
+              <div>G</div>
+              <div>O</div>
+            </div>
+            <div id="editorGrid" class="bingo-grid"></div>
+            <div class="card-actions">
+              <input id="numberInput" type="number" min="1" max="25" placeholder="Number 1–25" style="margin:0">
+              <button id="placeInputBtn">Place</button>
+              <button id="clearCardBtn" class="secondary">Clear</button>
+            </div>
+
+            <div class="card-actions">
+              <button id="randomizeCardBtn">🎲 Randomize Card</button>
+            </div>
+            <div style="margin-top:10px;max-width:430px" id="cardMessage" class="muted">0 / 25 numbers placed</div>
+            <button id="readyBtn" style="width:100%;max-width:430px;margin-top:10px" disabled>READY</button>
+          </div>
+          <div class="panel">
+            <h3>Available numbers</h3>
+            <div id="numberPalette" class="numbers"></div>
+          </div>
+        </main>
+
+        <aside>
+          <div class="panel">
+            <h3>Players <span id="playerCount" class="muted"></span></h3>
+            <ul id="playerList" class="players"></ul>
+            <p id="readySummary" class="muted" style="margin:12px 0 0"></p>
+          </div>
+          <div class="panel">
+            <b>Game rules</b>
+            <p class="muted" style="margin:8px 0 0">There must be 2–5 players. Each player uses every number 1–25 exactly once.
+              A called number is marked on every card. One completed row, column, or diagonal counts as one BINGO letter;
+              after 5 completed lines, press BINGO to validate and end the game.
+            </p>
+          </div>
+        </aside>
+      </div>
+
+      <div id="playingView" class="game-layout hidden">
+        <main>
+          <div class="panel">
+            <div class="bingo-head">
+              <div>B</div>
+              <div>I</div>
+              <div>N</div>
+              <div>G</div>
+              <div>O</div>
+            </div>
+            <div id="gameGrid" class="bingo-grid"></div>
+            <div id="bingoProgress" class="bingo-progress" aria-live="polite">— (0/5 completed lines)</div>
+            <button id="bingoBtn" style="width:100%;margin-top:10px">BINGO! (0/5)</button>
+          </div>
+        </main>
+        <aside>
+          <div class="panel">
+            <div class="muted">Current turn</div>
+            <div id="turnDisplay" class="turn-box">—</div>
+          </div>
+          <div class="panel">
+            <div class="muted">Last called</div>
+            <div id="lastCalled" class="last">—</div>
+          </div>
+          <div class="panel">
+            <div class="muted" style="margin-bottom:7px">Called numbers</div>
+            <div id="callHistory" class="history"></div>
+          </div>
+          <div class="panel">
+            <div class="muted" style="margin-bottom:7px">Players</div>
+            <ul id="playingPlayerList" class="players"></ul>
+          </div>
+        </aside>
+      </div>
+
+      <div id="finishedView" class="hidden">
+        <div class="panel">
+          <h2 id="winnerDisplay">Game over</h2>
+          <p class="muted">All player cards are revealed only after the game ends. The host can start a new game, or any player can leave.</p>
+          <div id="finalCards" class="final-cards"></div>
+        </div>
+      </div>
     </section>
-
-  </section>
-
-</main>
-
-<script src="app.js"></script>
-
+  </div>
+  <script src="app.js"></script>
 </body>
+
 </html>
