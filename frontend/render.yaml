@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: bingo-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: BINGO_ALLOWED_ORIGINS
+        sync: false

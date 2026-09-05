@@ -2,6 +2,16 @@ let ws = null;
 let myPlayerId = null;
 let isHost = false;
 let leavingRoom = false;
+
+const configuredBackend = String(window.BINGO_CONFIG?.backendUrl || '').trim().replace(/\/$/, '');
+const backendBase = configuredBackend || window.location.origin;
+const backendHTTP = backendBase;
+const backendWS = backendBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+
+function backendPath(path) {
+  return `${backendHTTP}${path}`;
+}
+
 let roomCode = null;
 let roundId = 0;
 let status = 'waiting';
@@ -128,10 +138,9 @@ function clearReconnectSession() {
 }
 
 function connect(code, name) {
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const token = loadReconnectSession(code, name);
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  ws = new WebSocket(`${protocol}://${location.host}/ws?room=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}${tokenParam}`);
+  ws = new WebSocket(`${backendWS}/ws?room=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}${tokenParam}`);
 
   ws.onopen = () => { joinError.textContent = ''; };
   ws.onerror = () => { joinError.textContent = 'Could not connect. Check the room code or whether joining is still open.'; };
@@ -148,7 +157,7 @@ createBtn.onclick = async () => {
   const name = nameInput.value.trim();
   if (!name) { joinError.textContent = 'Enter your name first.'; return; }
   try {
-    const res = await fetch('/api/rooms', { method: 'POST' });
+    const res = await fetch(backendPath('/api/rooms'), { method: 'POST' });
     if (!res.ok) throw new Error('room creation failed');
     const data = await res.json();
     clearReconnectSession();

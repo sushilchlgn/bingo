@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,21 +23,31 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
+		CheckOrigin: func(r *http.Request) bool {
+			return originAllowed(r.Header.Get("Origin"), r)
+		},
+}
+
+func originAllowed(origin string, r *http.Request) bool {
+	if origin == "" {
+		return true
+	}
+	configured := strings.TrimSpace(os.Getenv("BINGO_ALLOWED_ORIGINS"))
+	for _, allowed := range strings.Split(configured, ",") {
+		if strings.EqualFold(strings.TrimRight(strings.TrimSpace(allowed), "/"), strings.TrimRight(origin, "/")) {
 			return true
 		}
-		u, err := url.Parse(origin)
-		if err != nil || u.Host != r.Host {
-			return false
-		}
-		requestScheme := "http"
-		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-			requestScheme = "https"
-		}
-		return strings.EqualFold(u.Scheme, requestScheme)
-	},
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil || u.Host != r.Host {
+		return false
+	}
+	requestScheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		requestScheme = "https"
+	}
+	return strings.EqualFold(u.Scheme, requestScheme)
 }
 
 type clientMsg struct {

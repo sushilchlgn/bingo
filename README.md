@@ -42,14 +42,21 @@ network / after deploying) to play with more players.
   period expires or the host intentionally leaves, host status passes to the
   oldest connected player.
 
-## Deploying so friends elsewhere can join
+## Deploying with Netlify and a Go backend
 
-Any small VM or PaaS that runs a Go binary works (Fly.io, Railway,
-a $5 VPS, etc.). Build a binary with `go build -o bingo-server .`,
-run it, and share `http://<your-server>:8080` plus the room code.
-For real deployments, put it behind HTTPS (e.g. via a reverse proxy)
-so the frontend can use `wss://` — the JS already auto-detects this
-based on `location.protocol`.
+Netlify hosts the static frontend, while the Go WebSocket server must run on a persistent backend host. The repository includes `netlify.toml`, which publishes the `static` directory, and `static/config.js`, which contains the backend URL used by the browser.
+
+First deploy this project as a persistent Docker service using `Dockerfile` or `render.yaml` on Render, Railway, Fly.io, or a VPS. Configure the backend environment variable `BINGO_ALLOWED_ORIGINS` to the exact Netlify site origin, for example `https://your-site.netlify.app`. The backend must be reachable over HTTPS so its WebSocket endpoint is available as `wss://your-backend.example.com/ws`.
+
+Then edit `static/config.js` before deploying the frontend:
+
+```js
+window.BINGO_CONFIG = {
+  backendUrl: "https://your-backend.example.com"
+};
+```
+
+Deploy the repository to Netlify using `netlify.toml`, or drag the `static` folder into Netlify Drop. The browser will send room creation requests to the configured backend and open WebSocket connections there. Local development continues to use same-origin `go run .` behavior when `backendUrl` is empty.
 
 ## Files
 
